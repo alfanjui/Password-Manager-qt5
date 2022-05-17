@@ -1,12 +1,12 @@
-import sys, os
+import sys, os, base64
 from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtCore as qtc
 from PyQt5 import QtGui as qtg
-from PyQt5 import QtSql as qtsql
 
-import passy
+from modules import passy
 import sqlite3
 
+#background-color = "#FBE698"
 
 style = '''*{background-color: #FBE698;
         border: 4px solid #6DECE0;
@@ -56,7 +56,6 @@ class MainWindow(qtw.QWidget):
         self.config_button.setStyleSheet(style)
         self.config_button.setCursor(qtg.QCursor(qtc.Qt.PointingHandCursor))
 
-
         ########## LAYOUT #############
         grid = qtw.QGridLayout()
 
@@ -88,18 +87,18 @@ class MainWindow(qtw.QWidget):
         if filename:
             with open(filename, 'r') as handle:
                 text = handle.read()
-            
+
 
 class DialogWindow(qtw.QWidget):
     submitted = qtc.pyqtSignal(str, str)
-    
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         #CODE BODY
         self.setWindowTitle("Password Manager")
         self.setStyleSheet(background_style)
-        self.setFixedWidth(400)    
+        self.setFixedWidth(400)
         self.setFixedHeight(300)
 
         self.username_input = qtw.QLineEdit()
@@ -108,9 +107,13 @@ class DialogWindow(qtw.QWidget):
         self.password_input = qtw.QLineEdit()
         self.password_input.setEchoMode(qtw.QLineEdit.Password)
         self.password_input.setStyleSheet(style)
-        
+
+        self.salt_input = qtw.QLineEdit()
+        self.salt_input.setEchoMode(qtw.QLineEdit.Password)
+        self.salt_input.setStyleSheet(style)
+
         self.cancel_button = qtw.QPushButton(
-                'Cancel', 
+                'Cancel',
                 clicked=self.change_to_main
                 )
         self.cancel_button.setStyleSheet(style)
@@ -121,22 +124,22 @@ class DialogWindow(qtw.QWidget):
                 )
         self.login_button.setStyleSheet(style)
 
-        #LAYOUT 
-        layout = qtw.QGridLayout() 
-        layout.addWidget(self.username_input) 
+        #LAYOUT
+        layout = qtw.QGridLayout()
+        layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
 
         button_widget = qtw.QWidget()
         button_widget.setLayout(qtw.QHBoxLayout())
         button_widget.layout().addWidget(self.cancel_button)
         button_widget.layout().addWidget(self.login_button)
-        
+
         layout.addWidget(button_widget)
         self.setLayout(layout)
 
         #BUTTONS
         self.username_input.textChanged.connect(self.set_button_text)
-        
+
     @qtc.pyqtSlot(str)
     def set_button_text(self, text):
         if text:
@@ -147,25 +150,38 @@ class DialogWindow(qtw.QWidget):
     def authenticate(self):
         username = self.username_input.text()
         password = self.password_input.text()
-        
+
         if len(username)==0 or len(password)==0:
             qtw.QMessageBox.critical(self, 'Error', 'Please fill all the fields')
 
         if os.path.isfile(str(username) + ".db"):
+            hashed_password = passy.Passy.key_hasher(self, bytes(password, "UTF-8"))
             con = sqlite3.connect("master.db")
             cur = con.cursor()
             cur.execute('''SELECT user, master_password FROM crypted 
-                        WHERE user=? AND master_password=?''', (username, password))
+                        WHERE user=?''', (username,))
             userdata_checked = cur.fetchone()
-            print(userdata_checked)
-            print(userdata_checked[0])
-            print(userdata_checked[1])
-            
-            if userdata_checked[0] == username and userdata_checked[1] == password:
+            user_salt = userdata_checked[1]
+            db_password = userdata_checked[1]
+            user_salt = user_salt[:24]
+            db_password = db_password[24:]
+
+            if userdata_checked[0] == username and db_password == hashed_password:
                 qtw.QMessageBox.information(self, 'Access granted', 'Access granted')
+                with open(username + ".db", 'rb') as f:
+                    data = f.read()
+                    decrypted_data = passy.Passy.decrypter(self, data, user_salt, password)
+
+                with open(str(username)+".db", 'wb') as d:
+                    d.write(decrypted_data)
+
                 self.change_to_table(username)
+
             else:
                 qtw.QMessageBox.critical(self, 'Error', 'Credentials given are not correct')
+                print(db_password)
+                print(user_salt)
+                print(hashed_password)
         else:
             qtw.QMessageBox.critical(self, 'Error', "Database doesn't exist")
             print("DB does not exist")
@@ -292,7 +308,7 @@ class AddNetwork(qtw.QWidget):
 
         self.register_button = qtw.QPushButton(
                 "Register",
-                clicked=lambda:self.register_network_in_masterDB(self.user)
+                clicked=lambda:self.register_network_in_userDB(self.user)
                 )
         self.register_button.setStyleSheet(style)
 
@@ -316,7 +332,7 @@ class AddNetwork(qtw.QWidget):
         self.close()
         table_window.show() 
 
-    def register_network_in_masterDB(self, user):
+    def register_network_in_userDB(self, user):
         con = sqlite3.connect(str(user) + ".db")
         cur = con.cursor()
 
@@ -347,7 +363,7 @@ class SignupWindow(qtw.QWidget):
         #CODE BODY
         self.setWindowTitle("Password Manager")
         self.setStyleSheet(background_style)
-        self.setFixedWidth(400)    
+        self.setFixedWidth(400)
         self.setFixedHeight(300)
 
         self.username_signup_input = qtw.QLineEdit()
@@ -365,7 +381,6 @@ class SignupWindow(qtw.QWidget):
                 )
         self.back_button.setStyleSheet(style)
 
-
         self.register_button = qtw.QPushButton(
                 "Register",
                 clicked=self.register_in_masterDB
@@ -378,7 +393,6 @@ class SignupWindow(qtw.QWidget):
         self.buttons_widget.layout().addWidget(self.back_button)
         self.buttons_widget.layout().addWidget(self.register_button)
 
-
         self.layout = qtw.QVBoxLayout()
         self.layout.addWidget(self.username_signup_input)
         self.layout.addWidget(self.password_signup_input)
@@ -390,37 +404,53 @@ class SignupWindow(qtw.QWidget):
         self.main_window = MainWindow()
         self.close()
         self.main_window.show()
-        
-    def register_in_masterDB(self):
-        user_text = self.username_signup_input.text() 
-        pass_text = self.password_signup_input.text()
 
-        if not len(user_text)==0 or not len(pass_text)==0:
+    def register_in_masterDB(self):
+        user_text = self.username_signup_input.text()
+        pass_text = bytes(self.password_signup_input.text(), "UTF-8")
+        user_salt = base64.b64encode(os.urandom(16)).decode('utf-8') 
+
+        if len(user_text)==0 and len(pass_text)==0:
+            qtw.QMessageBox.critical(self, 'Error', 'Please fill up all the fields :)')
+
+        if not os.path.isfile(str(user_text)+".db"):
             con = sqlite3.connect("master.db")
             cur = con.cursor()
 
-            cur.execute("INSERT INTO crypted VALUES(?, ?)", (str(user_text), str(pass_text)))
+            encrypted_password = passy.Passy.key_hasher(self, pass_text)
+            pass_and_salt = user_salt + encrypted_password
+            print(user_salt)
+            print(pass_and_salt)
+
+            cur.execute("INSERT INTO crypted VALUES(?, ?)", (str(user_text), str(pass_and_salt)))
             con.commit()
             print("Query succesfully executed")
             con.close()
-        
+
             user_DB_con = sqlite3.connect(str(user_text) + ".db")
-            user_DB_con.execute('''CREATE TABLE IF NOT EXISTS CREDENTIALS (
-                                   network TEXT NOT NULL PRIMARY KEY,
-                                   user TEXT NOT NULL,
-                                   'e-mail' TEXT NOT NULL,
-                                   password TEXT NOT NULL)''')
+            user_DB_con.execute('''CREATE TABLE IF NOT EXISTS CREDENTIALS(
+                                network TEXT NOT NULL PRIMARY KEY,
+                                user TEXT NOT NULL,
+                                'e-mail' TEXT NOT NULL,
+                                password TEXT NOT NULL)''')
+
+            with open(str(user_text)+".db", 'rb') as f:
+                data = f.read()
+                encrypted_data = passy.Passy.encrypter(self, data, user_salt, pass_text)
+
+            with open(str(user_text)+".db", 'wb') as e:
+                e.write(encrypted_data)
 
             registered_message_box = qtw.QMessageBox()
             registered_message_box.setIcon(qtw.QMessageBox.Information)
-            registered_message_box.setText("Account succesfully created")
+            registered_message_box.setText("Account succesfully created and encrypted")
             registered_message_box.exec_()
 
             self.change_to_main()
-        
-        else:
-            qtw.QMessageBox.critical(self, 'Error', 'Please fill up all the fields :)')
-            
+
+        else: 
+            qtw.QMessageBox.critical(self, 'Error', 'This user already exists')
+
 
 class ConfigWindow(qtw.QWidget):
     def __init__(self):
@@ -431,7 +461,7 @@ class ConfigWindow(qtw.QWidget):
         self.save_changes_button = qtw.QPushButton(
                 'Save changes'
                 )
-    
+
         #LAYOUT
         self.setLayout(qtw.QFormLayout())
         self.layout().addRow(self.animation_checkbox)
@@ -445,4 +475,3 @@ if __name__ == '__main__':
     mainw = MainWindow()
 
     sys.exit(app.exec_())
-    
